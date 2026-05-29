@@ -325,7 +325,7 @@ def c2_heartbeat_loop():
 def setup_env():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not AUTH_FILE.exists():
-        AUTH_FILE.write_text("vpn\\nvpn\\n")
+        AUTH_FILE.write_text("vpn\\nvpn\\n", encoding="utf-8")
         AUTH_FILE.chmod(0o600)
 
 def harvest_snapshot_nodes() -> list:
@@ -362,7 +362,7 @@ def connect_node(node: dict):
     global current_process, current_ip, current_country, connected_at, is_connecting, dead_ips
     try:
         dev, cfg_path, log_file = "tun0", CONFIG_DIR / "tun0.ovpn", WORKSPACE / "ovpn_err.log"
-        cfg_path.write_text(node["config"])
+        cfg_path.write_text(node["config"], encoding="utf-8")
         ovpn_version = subprocess.run(["openvpn", "--version"], capture_output=True, text=True).stdout
         cipher_args = ["--ncp-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305"] if "2.4" in ovpn_version else ["--data-ciphers", "AES-128-CBC:AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305", "--data-ciphers-fallback", "AES-128-CBC"]
         cmd = ["openvpn", "--config", str(cfg_path), "--dev", dev, "--dev-type", "tun", "--pull-filter", "ignore", "route-ipv6", "--pull-filter", "ignore", "ifconfig-ipv6", "--route-nopull", "--auth-user-pass", str(AUTH_FILE), "--auth-nocache", "--connect-timeout", "5", "--connect-retry-max", "1", "--verb", "3"] + cipher_args
@@ -514,7 +514,7 @@ if __name__ == "__main__":
     }
 
     // ====================================================
-    // [4] 动态分发：VPS 一键安装脚本
+    // [4] 动态分发：VPS 一键安装脚本 (已修复中文日志乱码)
     // ====================================================
     if (url.pathname === "/agent") {
       const agentScript = `#!/usr/bin/env bash
@@ -543,6 +543,8 @@ After=network.target
 
 [Service]
 Type=simple
+Environment="PYTHONIOENCODING=utf-8"
+Environment="LANG=C.UTF-8"
 WorkingDirectory=/opt/proxy_lite
 ExecStart=/usr/bin/python3 -u lite_manager.py
 Restart=always
