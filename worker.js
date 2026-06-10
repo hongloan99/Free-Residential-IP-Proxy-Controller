@@ -498,7 +498,9 @@ def health_check_loop():
     global tun_main, dead_ips
     fail_count = 0
     while True:
-        time.sleep(15)
+        # 如果处于异常容错状态，缩短检测间隔进行快速复核
+        time.sleep(15 if fail_count == 0 else 5)
+        
         target_tun = ""
         target_entry_ip = ""
         proc_ref = None
@@ -514,11 +516,12 @@ def health_check_loop():
             fail_count = 0
             continue
             
-        # 使用多个高可用节点交叉验证，防止单点 API 限流导致的误判
+        # 1. 应用层：多维 HTTP 探针 (包含域名与直连IP，规避单点限流和DNS污染)
         endpoints = [
             "http://www.gstatic.com/generate_204",
             "http://cp.cloudflare.com/generate_204",
-            "https://api.ipify.org"
+            "http://1.1.1.1",
+            "http://8.8.8.8"
         ]
         
         is_alive = False
@@ -528,10 +531,17 @@ def health_check_loop():
                 is_alive = True
                 break
                 
+        # 2. 网络层：如果应用层全挂，尝试底层 ICMP (Ping) 作为终极底线
+        if not is_alive:
+            ping_res = subprocess.run(["ping", "-c", "2", "-W", "3", "-I", target_tun, "8.8.8.8"], capture_output=True)
+            if ping_res.returncode == 0:
+                is_alive = True
+                
+        # 3. 容错评估与处决
         if not is_alive:
             fail_count += 1
-            if fail_count >= 2:
-                print(f"[!] {target_tun} 连续多次跨节点验证失败，确认假死断流，踢线: {target_entry_ip}", flush=True)
+            if fail_count >= 3:
+                print(f"[!] {target_tun} 连续 {fail_count} 次多维探针(HTTP/ICMP)均无响应，确认为真死断流，执行踢线: {target_entry_ip}", flush=True)
                 dead_ips.add(target_entry_ip)
                 try: proc_ref.terminate(); proc_ref.wait(timeout=2)
                 except: proc_ref.kill()
@@ -539,7 +549,7 @@ def health_check_loop():
                     if tun_main.process == proc_ref: tun_main.ready = False
                 fail_count = 0
             else:
-                print(f"[*] {target_tun} 健康检测无响应，进入二次验证阶段 ({fail_count}/2)...", flush=True)
+                print(f"[*] {target_tun} 探针无响应，启动快频深度复核容错机制 ({fail_count}/3)...", flush=True)
         else:
             fail_count = 0
 
