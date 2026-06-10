@@ -8,6 +8,14 @@
 
 KUI面板正在集成融合免费免费住宅IP代理调度系统 https://github.com/a6216abcd/K-UI
 
+老用户覆盖代码，记得重新去vps运行agent命令，长时间获取不到IP，记得装一下warp ipv4
+
+```bash
+wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh
+
+```
+
+
 # 免费住宅IP代理调度系统 🌐
 
 这是一个轻量级的智能代理调度系统。基于 Cloudflare Workers 与 D1 数据库构建中心控制节点，配合 VPS 守护进程，实现高频自动切换、优选纯净住宅 IP 的 Socks5/HTTP 代理服务。
