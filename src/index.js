@@ -267,6 +267,16 @@ class Tunnel:
 tun_main = Tunnel("tun_main", 101)
 tun_backup = Tunnel("tun_backup", 102)
 
+def penalize_node(ip: str, penalty: int):
+    """
+    节点信誉动态降级机制：
+    给不可用或低质的节点加上高额的虚拟 ping 值惩罚，
+    确保下一次调度排序时，该节点被永久压入蓄水池底部，从而避免"死循环假性枯竭"。
+    """
+    with reservoir_lock:
+        if ip in global_node_reservoir:
+            global_node_reservoir[ip]["ping"] += penalty
+
 def get_public_ip():
     global public_ip
     try:
@@ -387,8 +397,10 @@ def vpngate_fetch_loop():
         if snapshot:
             with reservoir_lock:
                 for n in snapshot:
-                    if n["ip"] not in dead_ips:
-                        global_node_reservoir[n["ip"]] = n
+                    # 保留原有的惩罚性 ping 值，防止坏节点被新抓取的快照刷新后又跑到前列去
+                    if n["ip"] in global_node_reservoir:
+                        n["ping"] = max(n["ping"], global_node_reservoir[n["ip"]]["ping"])
+                    global_node_reservoir[n["ip"]] = n
             print(f"[*] ⚡ 节点库更新，当前囤积有效节点 -> {len(global_node_reservoir)} 个", flush=True)
         time.sleep(300)
 
@@ -461,6 +473,7 @@ def connect_node(tun: Tunnel, node: dict):
             
             if not is_residential:
                 print(f"[-] {tun.name} 节点出口 ({egress_ip}) 检测为机房 IP，残忍抛弃！", flush=True)
+                penalize_node(node["ip"], 50000)  # 机房 IP 极重惩罚，几乎不再启用
                 dead_ips.add(node["ip"])
                 try: process.terminate(); process.wait(2)
                 except: process.kill()
@@ -470,6 +483,7 @@ def connect_node(tun: Tunnel, node: dict):
             res = subprocess.run(["curl", "-I", "-s", "-A", "Mozilla/5.0", "-m", "5", "--interface", tun.name, "https://www.youtube.com"], capture_output=True)
             if res.returncode != 0:
                 print(f"[-] {tun.name} 节点出口无法连通 YouTube，拉黑更换: {node['ip']}", flush=True)
+                penalize_node(node["ip"], 10000)  # YT 连不通重罚
                 dead_ips.add(node["ip"])
                 try: process.terminate(); process.wait(2)
                 except: process.kill()
@@ -486,6 +500,7 @@ def connect_node(tun: Tunnel, node: dict):
             role = "主网卡" if proxy_server.ACTIVE_BIND == tun.name else "备用网卡"
             print(f"[+] {tun.name} ({role}) 完全就绪: 入口 {node['ip']} -> 出口 {egress_ip}", flush=True)
         else:
+            penalize_node(node["ip"], 5000)  # 建连超时中度惩罚
             try: process.terminate(); process.wait(2)
             except: process.kill()
             dead_ips.add(node["ip"])
@@ -540,6 +555,7 @@ def health_check_loop():
             fail_count += 1
             if fail_count >= 3:
                 print(f"[!] {target_tun} 连续 {fail_count} 次多维探针(HTTP/ICMP)均无响应，确认为真死断流，执行踢线: {target_entry_ip}", flush=True)
+                penalize_node(target_entry_ip, 3000) # 运行中死掉的节点给予轻中度惩罚
                 dead_ips.add(target_entry_ip)
                 try: proc_ref.terminate(); proc_ref.wait(timeout=2)
                 except: proc_ref.kill()
@@ -566,7 +582,7 @@ def get_best_candidate():
             has_blacklisted = any(n["country"] == target_country for n in all_pool_nodes)
             if has_blacklisted:
                 dead_ips.clear()
-                print(f"[!] ⚡ 紧急熔断：[{target_country}] 节点枯竭，解锁历史黑名单救场！", flush=True)
+                print(f"[!] ⚡ 紧急熔断：[{target_country}] 节点黑名单释放救场（由于动态信誉系统存在，历史坏节点将被沉底）", flush=True)
                 candidates = [n for n in all_pool_nodes if n["country"] == target_country and n["ip"] not in active_ips]
 
         if candidates: return candidates.pop(0)
